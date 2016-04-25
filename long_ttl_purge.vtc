@@ -1,0 +1,58 @@
+varnishtest "purge objects with long ttl"
+
+server s1 {
+        rxreq
+        txresp -hdr "to_be_purged: yes"
+        rxreq
+        txresp -hdr "to_be_purged: no"
+} -start
+
+varnish v1 -vcl+backend {
+        sub vcl_recv {
+		if (req.method == "PURGE" && req.http.purge == "yes") {
+                        return (purge);
+                }
+        }
+} -start
+
+client c1 {
+	txreq
+        rxresp
+        expect resp.http.to_be_purged == "yes"
+	
+	txreq
+        rxresp
+        expect resp.http.to_be_purged == "yes"
+	
+	# we purge, after this request the cache is empty again
+	txreq -req PURGE -hdr "purge: yes"
+        rxresp
+        expect resp.msg == "Purged"
+} -run
+
+client c1 {
+	txreq
+        rxresp
+	# we expect a fresh object from the web_server
+        expect resp.http.to_be_purged == "no"
+} -run
+
+# A quick overview
+WHAT ARE WE TESTING?
+When you define your cache policy you should also have a good plan for your cache invalidation. With this test case we test we are able to
+check if we are able to purge objects fro the cache.
+
+Testing cache invalidation is very important, for example let's take the worst possible scenario: we have 2 GB of cache storage and suddenly a 1GB
+object with 365 days ttl gets in cache and uses more then 50%(1GB plus a little overhead for structures allocation) of the available memory.
+Now, let's say we also realise that the object is no more important and we don't want to cache it anymore.
+If we are not able to purge that object out of the cache it will just use memory which could be use for other objects.
+Developing a good cache invalidation policy and adjusting objects' ttl is strongly suggested to avoid annoying situation. 
+
+HOW DO WE DO IT?
+In our test case there is a single "server s1", a Varnish instance where simple VCL for purging is defined and a client c1 which fires four different
+transactions.
+
+More details above.
+
+N.B. The test case is a a very simple example on how to cache objects with Cookie headers, it is not intended to be used for real production.
+     Further VCL development is required before making it production ready.
