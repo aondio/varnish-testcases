@@ -81,7 +81,7 @@ HOW DO WE DO IT?
 In our test case we have a single backend "server s1", a Varnish instance where some lines of VCL are defined (please remember the builtin
 VCL is always appended to it) and three clients (c1, c2, c3).
 We test that whenever we want to cache object contating a cookie we can do it. This is achieved by defining VCL specific for the situation,
-In this case we will cache every request with both a Cookie header and a second header that assert it is saefe to cache. 
+In this case we will cache every request with both a Cookie header and a second header that assert it is safe to cache. 
 
 In details:
 client c1: it has a Cookie and a X-safe header, meaning that the object requested by c1 will be cacheble (ref vcl_recv)
