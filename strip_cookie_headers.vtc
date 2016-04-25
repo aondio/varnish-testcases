@@ -1,0 +1,98 @@
+varnishtest "Caching also when Cookie header is set"
+
+
+server s1 {
+# Client c1 transactions
+        rxreq
+        txresp
+# Client c3 transactions
+        rxreq
+        txresp
+} -start
+
+varnish v1 -vcl+backend {
+
+        sub vcl_recv {
+		# If there is a cookie header and a header that 'assures'
+		# caching with Cookies is safe, than we allow it
+ 
+		if (req.http.Cookie && req.http.x-safe == "Safe-cookie") {
+			unset req.http.Cookie;
+			return(hash);
+		}
+
+		# If a cookie header is present, but it is not considered safe to cache, then
+		# the request is "pass(ed)".
+		# The below VCL is commented out because is already present in the builtin VCL.
+
+		# The builtin VCL "pass" by default all the requests with a Cookie header
+   		#if (req.http.Authorization || req.http.Cookie) {
+        	#	/* Not cacheable by default */
+        	#	return (pass);
+    		#	}
+        }
+
+	sub vcl_deliver {
+		if (obj.hits > 0) {
+		 # Add debug header to see if it's a HIT/MISS and the number of hits, disable when not needed
+        		set resp.http.X-Cache = "HIT";
+    		} else {
+    			set resp.http.X-Cache = "MISS";
+    		}
+	}
+
+} -start
+
+client c1 {
+	# c1 has a Cookie header, but also a header that specify we consider it safe to be cached
+        txreq -hdr "Cookie: value" -hdr " x-safe: Safe-cookie"
+        rxresp
+	# we expect a MISS because that's the first request going through Varnish
+	expect resp.http.X-Cache == "MISS"
+} -run
+
+client c2 {
+        txreq -hdr "Cookie: value2"
+        rxresp
+	# we expect a MISS beacuse the request has a Cookie
+	# header and the request is passed to the backend
+	expect resp.http.X-Cache == "MISS"
+} -run
+
+client c3 {
+        txreq -hdr "Cookie: value" -hdr " x-safe: Safe-cookie"
+        rxresp
+	# we expect a HIT because it's the same object requested by client c1
+	expect resp.http.X-Cache == "HIT"
+}
+
+
+# A quick overview.
+WHAT ARE WE TESTING?
+Since Cookies are used to identify unique users and can contain personal user info, by default Varnish does not cache a page if it contains 
+Cookie or Set-Cookie headers, that's for two reasons:
+1. to avoid populating the cache with copies of the same content
+2. to avoid delivering cookie-based to the wrong client.
+
+The test case represent a scenario where we want to cache objects with a cookie header and make sure that each of three defined clients
+get the correct object.
+
+HOW DO WE DO IT?
+In our test case we have a single backend "server s1", a Varnish instance where some lines of VCL are defined (please remember the builtin
+VCL is always appended to it) and three clients (c1, c2, c3).
+We test that whenever we want to cache object contating a cookie we can do it. This is achieved by defining VCL specific for the situation,
+In this case we will cache every request with both a Cookie header and a second header that assert it is saefe to cache. 
+
+In details:
+client c1: it has a Cookie and a X-safe header, meaning that the object requested by c1 will be cacheble (ref vcl_recv)
+client c2: it has a Cookie header, but no any other header that indicates we want to use an object already in cache.
+client c3: same situation as c1. Varnish will ignore the cookie header (following the policy we have defined in VCL) and the client c3 will
+	get the object first retrieved on c1 request.
+VCL: is already explained above
+server s1: two complete set of transaction, the first one in for the client c1 while the second for client c2. Client c3 doesn't have
+	to fetch a new object from the backend beacuse it uses the one already in cache.
+
+
+N.B. The test case is a a very simple example on how to cache objects with Cookie headers, it is not intended to be used for real production.
+     Further VCL development is required before making it production ready.
+
